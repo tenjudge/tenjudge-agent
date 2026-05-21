@@ -65,14 +65,16 @@ logger = logging.getLogger(__name__)
 # Code 响应码
 class Code(Enum):
     SUCCESS = (200, 0, "success")
-    PARAM_ERROR = (422, 40000, "Invalid request parameters")
-    HTTP_ERROR = (400, 40099, "Bad request")
-    NOT_FOUND = (404, 40400, "Resource not found")
-    METHOD_NOT_ALLOWED = (405, 40500, "Method not allowed")
+    PARAM_ERROR = (422, 50001, "Invalid request parameters")
+    HTTP_ERROR = (400, 50002, "Bad request")
+    NOT_FOUND = (404, 50003, "Resource not found")
+    METHOD_NOT_ALLOWED = (405, 50004, "Method not allowed")
     SERVER_ERROR = (500, 1, "server error")
 
     UNAUTHORIZED = (401, 10001, "unauthorized")
     FORBIDDEN = (403, 10002, "forbidden")
+    CONVERSATION_NOT_FOUND = (404, 50005, "conversation not found")
+    CONVERSATION_IS_RUNNING = (404, 50006, "conversation already running")
 
     def __init__(self, http_status: int, biz_code: int, message: str):
         self.http_status = http_status
