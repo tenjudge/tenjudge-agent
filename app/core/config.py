@@ -5,6 +5,7 @@ class Settings(BaseSettings):
 
     OPENROUTER_API_KEY: str = ""
     DATABASE_URL: str = ""
+    TENJUDGE_SERVER_BASE_URL: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

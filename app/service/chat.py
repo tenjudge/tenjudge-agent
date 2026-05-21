@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from langchain.messages import AnyMessage
 from typing_extensions import TypedDict, Annotated
-from typing import Optional, List, Dict, Literal, Union, Any
+from typing import List, Literal, Union
 
 # ===== Request ==========================================================
 class CodeAttachment(BaseModel):
@@ -47,10 +47,11 @@ class State(TypedDict):
     messages: Annotated[list[AnyMessage], operator.add]
     files: List[CodeFile]
     token: str
+    user_id: int
 
 
-async def handle_chat(request: ChatRequest):
-    # TODO 鉴权
+async def handle_chat(request: ChatRequest, token: str, user_id: int):
+    # token 已在路由层校验，这里直接使用可信的 user_id。
 
     if request.conversation_id:
         # TODO
