@@ -7,6 +7,7 @@ from typing_extensions import TypedDict, Annotated
 
 from app.agents.context import CodeFileContext, ProblemContext, SubmissionContext
 
+##### State 定义与相关函数 ##############################################
 
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], operator.add]
@@ -79,3 +80,7 @@ def state_from_dict(state: dict[str, Any]) -> State:
         "token": state["token"],
         "user_id": state["user_id"],
     }
+
+
+##### LangGraph 节点定义 ##############################################
+

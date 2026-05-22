@@ -24,6 +24,7 @@ uv run uvicorn app.main:app --reload
 - `app/service/chat.py` contains chat service code.
 - `app/service/tenjudge_server.py` contains outbound HTTP calls to the TenJudge server, including current-user, problem, and submission lookup.
 - `app/agents/context.py` contains agent context models such as `CodeFile`, `CodeFileContext`, `Problem`, `ProblemContext`, `Submission`, `SubmissionDetail`, and `SubmissionContext`.
+- `app/agents/code_summarize_agent.py` contains `summarize_code_files`, which uses structured LLM output to turn raw code attachments plus conversation context into `CodeFile` objects.
 - `app/agents/orchestrator.py` owns the chat agent `State` TypedDict definition.
 - `app/repository/messages.py` contains message persistence code; messages use `(conversation_id, turn_index, role)` as the primary key and expose `get_by_key`, `delete_by_key`, and `delete_from_turn`.
 - `app/repository/tasks.py` contains task persistence code; tasks use `(conversation_id, turn_index)` as the primary key and expose `get_by_key`, `delete_by_key`, and `delete_from_turn`.
@@ -49,6 +50,8 @@ uv run uvicorn app.main:app --reload
 - Submission attachments fetch the submission and its problem, append both to state, and store the submitted source code as a separate `CodeFileContext`.
 - `handle_chat` collects code attachment source text into `code_sources: list[str]` and starts `run_task` asynchronously after the transaction.
 - `run_task` receives `code_sources: list[str]` and the current input state; it does not receive or interpret raw chat attachments.
+- Code attachment summarization uses `LLM("low")`, receives complete historical messages plus the current user message, returns English descriptions, and preserves the input code order.
+- `run_task` appends summarized code attachments to both `state["code_files"]` and `state["messages"]` before appending the current user message.
 - Repository methods support an optional external database connection via `conn=...`; pass the same connection to multiple repository calls when they must share one transaction.
 
 ## Confirmed Database Design
@@ -77,6 +80,7 @@ uv run uvicorn app.main:app --reload
 
 - Run Python and project commands through `uv` when applicable, for example `uv run python ...`.
 - If you find a problem in the user's code while working, point it out clearly.
+- When writing longer or structurally complex code, prefer Chinese numbered comments like `# 1. ...`, `# 2. ...`; use sub-numbering like `# 2.1 ...` and `# 2.2 ...` when a step has smaller parts. Add short Chinese end-of-line comments at key points when they clarify important state changes or side effects.
 - After writing code, if the change reveals or confirms useful project information, record it in this `AGENTS.md`.
 - If code and this `AGENTS.md` become inconsistent, update this `AGENTS.md` to match the code.
 

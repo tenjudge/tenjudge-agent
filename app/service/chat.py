@@ -101,7 +101,7 @@ def _append_submission_code_file_context(
     state["code_files"].append(code_file_context)
     return code_file_context
 
-
+# 题目 -> HumanMessage，消息中的题面 JSON 不包含 solution 字段，避免误导模型直接看题解。
 def _build_problem_attachment_message(problem_context: ProblemContext) -> HumanMessage:
     content = (
         "[Attachment: problem]\n\n"
@@ -114,7 +114,7 @@ def _build_problem_attachment_message(problem_context: ProblemContext) -> HumanM
     )
     return HumanMessage(content=content)
 
-
+# 提交 -> HumanMessage，包含提交信息+提交代码+题目信息（不包含题解）。
 def _build_submission_attachment_message(
         submission_context: SubmissionContext,
         problem_context: ProblemContext,
