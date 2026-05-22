@@ -1,10 +1,11 @@
 import uuid
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agents.context import CodeFile
 from app.agents.orchestrator import get_init_state
+from app.agents.plan_agent import Plan, Step
 from app.service import runner
 
 
@@ -29,10 +30,26 @@ async def test_run_task_appends_code_files_and_messages(monkeypatch):
             ),
         ]
 
+    async def fake_make_plan(messages, available_tools=None, planning_guidance=None):
+        calls["plan_messages"] = list(messages)
+        calls["available_tools"] = available_tools
+        calls["planning_guidance"] = planning_guidance
+        return Plan(
+            summary="Compare the attached code files.",
+            steps=[
+                Step(description="Inspect both code files and compare their behavior."),
+            ],
+        )
+
     monkeypatch.setattr(
         runner,
         "summarize_code_files",
         fake_summarize_code_files,
+    )
+    monkeypatch.setattr(
+        runner,
+        "make_plan",
+        fake_make_plan,
     )
 
     current_state = get_init_state()
@@ -50,6 +67,9 @@ async def test_run_task_appends_code_files_and_messages(monkeypatch):
     assert calls["code_sources"] == code_sources
     assert calls["message"] == "please compare these files"
     assert [message.content for message in calls["history_messages"]] == ["previous context"]
+    assert calls["available_tools"] == []
+    assert calls["planning_guidance"] is None
+    assert calls["plan_messages"][-1].content == "please compare these files"
 
     assert current_state["code_file_cnt"] == 3
     assert [code_file.id for code_file in current_state["code_files"]] == [
@@ -58,8 +78,11 @@ async def test_run_task_appends_code_files_and_messages(monkeypatch):
     ]
     assert [code_file.file.content for code_file in current_state["code_files"]] == code_sources
 
-    assert len(current_state["messages"]) == 4
+    assert len(current_state["messages"]) == 5
     assert "Code file context id: code_file_2" in current_state["messages"][1].content
     assert "Description: User's C++ attempted solution" in current_state["messages"][1].content
     assert "Source Code (code_file_2)" in current_state["messages"][1].content
-    assert current_state["messages"][-1].content == "please compare these files"
+    assert current_state["messages"][-2].content == "please compare these files"
+    assert isinstance(current_state["messages"][-1], SystemMessage)
+    assert current_state["messages"][-1].content.startswith("[Internal plan]")
+    assert "Compare the attached code files." in current_state["messages"][-1].content

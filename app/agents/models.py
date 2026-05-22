@@ -12,12 +12,12 @@ models = {
         base_url="https://openrouter.ai/api/v1",
     ),
     "medium": ChatOpenAI(
-        model="deepseek/deepseek-v4-flash",
+        model="deepseek/deepseek-v4-pro",
         api_key=settings.OPENROUTER_API_KEY,
         base_url="https://openrouter.ai/api/v1",
     ),
     "high": ChatOpenAI(
-        model="deepseek/deepseek-v4-flash",
+        model="deepseek/deepseek-v4-pro",
         api_key=settings.OPENROUTER_API_KEY,
         base_url="https://openrouter.ai/api/v1",
     ),

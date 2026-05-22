@@ -1,10 +1,11 @@
 import uuid
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agents.code_summarize_agent import summarize_code_files
 from app.agents.context import CodeFileContext
 from app.agents.orchestrator import State, next_code_file_context_id
+from app.agents.plan_agent import format_plan_for_message, make_plan
 
 
 def _build_code_attachment_message(code_file_context: CodeFileContext) -> HumanMessage:
@@ -55,7 +56,15 @@ async def run_task(
         # 3. 再追加本轮用户自然语言消息，保证 agent 看到的上下文顺序稳定。
         current_state["messages"].append(HumanMessage(content=message))
 
-        # 4. 执行主 agent，并在正常完成后落库最终 state、agent 消息和会话状态。
+        # 4. 基于当前完整上下文生成内部计划，并写入长期 messages，供后续 graph 节点参考。
+        # TODO 后续主 agent 工具体系确定后，把 available_tools=[] 替换为主 agent 的工具列表。
+        plan = await make_plan(
+            messages=current_state["messages"],
+            available_tools=[],
+        )
+        current_state["messages"].append(SystemMessage(content=format_plan_for_message(plan)))
+
+        # 5. 执行主 agent，并在正常完成后落库最终 state、agent 消息和会话状态。
         # TODO 调用 LangGraph/agent 主流程，写入 tasks.state、messages.agent，并更新 conversation.status。
         pass
     except Exception as exc:

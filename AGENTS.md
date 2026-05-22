@@ -25,6 +25,7 @@ uv run uvicorn app.main:app --reload
 - `app/service/tenjudge_server.py` contains outbound HTTP calls to the TenJudge server, including current-user, problem, and submission lookup.
 - `app/agents/context.py` contains agent context models such as `CodeFile`, `CodeFileContext`, `Problem`, `ProblemContext`, `Submission`, `SubmissionDetail`, and `SubmissionContext`.
 - `app/agents/code_summarize_agent.py` contains `summarize_code_files`, which uses structured LLM output to turn raw code attachments plus conversation context into `CodeFile` objects.
+- `app/agents/plan_agent.py` contains `make_plan`, which uses `LLM("medium")` structured output to create English execution plans from conversation messages, optional planning guidance, and LangChain tool metadata.
 - `app/agents/orchestrator.py` owns the chat agent `State` TypedDict definition.
 - `app/repository/messages.py` contains message persistence code; messages use `(conversation_id, turn_index, role)` as the primary key and expose `get_by_key`, `delete_by_key`, and `delete_from_turn`.
 - `app/repository/tasks.py` contains task persistence code; tasks use `(conversation_id, turn_index)` as the primary key and expose `get_by_key`, `delete_by_key`, and `delete_from_turn`.
@@ -52,6 +53,8 @@ uv run uvicorn app.main:app --reload
 - `run_task` receives `code_sources: list[str]` and the current input state; it does not receive or interpret raw chat attachments.
 - Code attachment summarization uses `LLM("low")`, receives complete historical messages plus the current user message, returns English descriptions, and preserves the input code order.
 - `run_task` appends summarized code attachments to both `state["code_files"]` and `state["messages"]` before appending the current user message.
+- `run_task` calls `make_plan` after appending the current user message, then appends the formatted internal plan as a `SystemMessage` to long-term `state["messages"]`.
+- Planning uses LangChain `BaseTool` objects directly; tool names, descriptions, input schemas, and return type schemas are extracted for `plan_agent`, while `@tool(parse_docstring=True)` is recommended but not required.
 - Repository methods support an optional external database connection via `conn=...`; pass the same connection to multiple repository calls when they must share one transaction.
 
 ## Confirmed Database Design
