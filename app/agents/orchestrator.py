@@ -5,7 +5,7 @@ from langchain.messages import AnyMessage
 from langchain_core.messages import messages_from_dict, messages_to_dict
 from typing_extensions import TypedDict, Annotated
 
-from app.agents.common import CodeFileContext, ProblemContext, SubmissionContext
+from app.agents.context import CodeFileContext, ProblemContext, SubmissionContext
 
 
 class State(TypedDict):
@@ -13,9 +13,9 @@ class State(TypedDict):
     code_files: list[CodeFileContext]
     problems: list[ProblemContext]
     submissions: list[SubmissionContext]
-    code_file_cnt: int
-    problem_cnt: int
-    submission_cnt: int
+    code_file_cnt: int  # 用于生成 code_file_N
+    problem_cnt: int  # 用于生成 problem_N
+    submission_cnt: int  # 用于生成 submission_N
     token: str
     user_id: int
 
@@ -32,6 +32,21 @@ def get_init_state() -> State:
         "token": "",
         "user_id": 0,
     }
+
+
+def next_code_file_context_id(state: State) -> str:
+    state["code_file_cnt"] += 1
+    return f"code_file_{state['code_file_cnt']}"
+
+
+def next_problem_context_id(state: State) -> str:
+    state["problem_cnt"] += 1
+    return f"problem_{state['problem_cnt']}"
+
+
+def next_submission_context_id(state: State) -> str:
+    state["submission_cnt"] += 1
+    return f"submission_{state['submission_cnt']}"
 
 
 def state_to_dict(state: State) -> dict[str, Any]:

@@ -1,7 +1,7 @@
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
-from app.agents.common import Problem, Submission
+from app.agents.context import Problem, Submission
 from app.core.config import settings
 from app.core.response import BizException, Code
 
