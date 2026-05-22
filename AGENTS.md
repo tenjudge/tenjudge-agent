@@ -9,6 +9,7 @@ This repository is the agent part of an OJ project.
 - Project name: `tenjudge-agent`
 - Python requirement: `>=3.14`
 - Dependency manager files present: `pyproject.toml`, `uv.lock`
+- Unit tests use `pytest`; run them with `uv run pytest`.
 - Main FastAPI app entrypoint: `app.main:app`
 - Development command recorded in source:
 
@@ -19,8 +20,11 @@ uv run uvicorn app.main:app --reload
 ## Confirmed Application Structure
 
 - `app/main.py` creates the FastAPI application.
-- `app/router/chat.py` defines the `/agent/chat` route.
+- `app/router/chat.py` defines the `/agent/chat` route and owns the chat request/response DTO models.
 - `app/service/chat.py` contains chat service code.
+- `app/service/tenjudge_server.py` contains outbound HTTP calls to the TenJudge server, including current-user, problem, and submission lookup.
+- `app/agents/common.py` contains common agent data models such as `CodeFile`, `CodeFileContext`, `Problem`, `ProblemContext`, `Submission`, `SubmissionDetail`, and `SubmissionContext`.
+- `app/agents/orchestrator.py` owns the chat agent `State` TypedDict definition.
 - `app/repository/messages.py` contains message persistence code; messages use `(conversation_id, turn_index, role)` as the primary key and expose `get_by_key`, `delete_by_key`, and `delete_from_turn`.
 - `app/repository/tasks.py` contains task persistence code; tasks use `(conversation_id, turn_index)` as the primary key and expose `get_by_key`, `delete_by_key`, and `delete_from_turn`.
 - `app/repository/states.py` contains LangGraph state persistence code and exposes `delete_by_ids` for deleting task-owned state snapshots.
@@ -40,6 +44,9 @@ uv run uvicorn app.main:app --reload
 - Task state snapshots are owned by their task; when deleting tasks from a turn onward, `handle_chat` deletes the states returned from those removed tasks.
 - `handle_chat` writes the current user message to `messages` with `role = "user"` and creates the current turn's `tasks` row with `state = NULL`.
 - `handle_chat` loads the current turn input state before creating the task: turn 1 uses `app.agents.orchestrator.get_init_state()`, later turns load the previous turn's task state from `tasks` and then `states`, then apply `state_from_dict`.
+- `handle_chat` handles problem and submission attachments in the transaction before starting the runner; the concrete problem/submission message-building work is still TODO.
+- `handle_chat` collects code attachment source text into `code_sources: list[str]` and starts `run_task` asynchronously after the transaction.
+- `run_task` receives `code_sources: list[str]` and the current input state; it does not receive or interpret raw chat attachments.
 - Repository methods support an optional external database connection via `conn=...`; pass the same connection to multiple repository calls when they must share one transaction.
 
 ## Confirmed Database Design
@@ -61,6 +68,8 @@ uv run uvicorn app.main:app --reload
 - `tasks.state` stores the final output state for the current turn after the async agent finishes.
 - `states` stores LangGraph state snapshots as JSONB.
 - `app.agents.orchestrator.state_to_dict` and `state_from_dict` serialize/deserialize LangChain messages with `messages_to_dict` and `messages_from_dict`.
+- `app.agents.orchestrator.State` contains `messages`, `code_files`, `problems`, `submissions`, `code_file_cnt`, `problem_cnt`, `submission_cnt`, `token`, and `user_id`.
+- Agent state file, problem, and submission references use outer context IDs (`CodeFileContext.id`, `ProblemContext.id`, `SubmissionContext.id`) as agent-facing stable identifiers; `Problem.problem_id` and `Submission.submission_id` store TenJudge server IDs.
 
 ## Agent Working Rules
 

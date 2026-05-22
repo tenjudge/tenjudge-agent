@@ -1,11 +1,7 @@
 import uuid
-import operator
+import asyncio
+from typing import Any
 
-from pydantic import BaseModel, Field, StringConstraints
-
-from langchain.messages import AnyMessage
-from typing_extensions import TypedDict, Annotated
-from typing import List, Literal, Union
 from datetime import datetime
 
 from app.agents.orchestrator import get_init_state, state_from_dict
@@ -15,51 +11,10 @@ from app.repository.conversations import Conversation, ConversationRepository
 from app.repository.messages import Message, MessageRepository
 from app.repository.states import StateRepository
 from app.repository.tasks import Task, TaskRepository
+from app.service.runner import run_task
 
 
-# ===== Request ==========================================================
-class CodeAttachment(BaseModel):
-    type: Literal["code"]
-    content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-
-class SubmissionAttachment(BaseModel):
-    type: Literal["submission"]
-    submission_id: int = Field(gt=0)
-
-class ProblemAttachment(BaseModel):
-    type: Literal["problem"]
-    problem_id: int = Field(gt=0)
-
-Attachment = Annotated[
-    Union[
-        CodeAttachment,
-        SubmissionAttachment,
-        ProblemAttachment,
-    ],
-    Field(discriminator="type")
-]
-
-class ChatRequest(BaseModel):
-    conversation_id: uuid.UUID | None = None
-    message: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-    turn_index: int | None = None
-    attachments: List[Attachment] = Field(default_factory=list)
-
-# ===== State ==========================================================
-
-class CodeFile(BaseModel):
-    id: int
-    description: str
-    language: Literal["cpp", "python", "else"]
-    content: str
-
-class State(TypedDict):
-    messages: Annotated[list[AnyMessage], operator.add]
-    files: List[CodeFile]
-    token: str
-    user_id: int
-
-async def handle_chat(request: ChatRequest, token: str, user_id: int):
+async def handle_chat(request: Any, token: str, user_id: int) -> dict[str, uuid.UUID]:
 
     # TODO 加分布式锁
     conversation_repository = ConversationRepository()
@@ -102,14 +57,14 @@ async def handle_chat(request: ChatRequest, token: str, user_id: int):
                     current_turn=1,
                     status="running",
                 )
-                await conversation_repository.insert(conversation, conn=conn)
+                conversation = await conversation_repository.insert(conversation, conn=conn)
 
                 # 2. 更新当前轮数
                 current_turn_index = 1
 
             # 获取当前轮的输入 state
             if current_turn_index == 1:
-                previous_state = get_init_state()
+                current_state = get_init_state()
             else:
                 previous_task = await task_repository.get_by_key(conversation.id, current_turn_index - 1, conn=conn)
                 if previous_task is None or previous_task.state is None:
@@ -119,7 +74,20 @@ async def handle_chat(request: ChatRequest, token: str, user_id: int):
                 if previous_state_record is None:
                     raise BizException(Code.SERVER_ERROR, "previous state not found")
 
-                previous_state = state_from_dict(previous_state_record.state)
+                current_state = state_from_dict(previous_state_record.state)
+            current_state["token"] = token
+            current_state["user_id"] = user_id
+
+            code_sources: list[str] = []
+            for attachment in request.attachments:
+                if attachment.type == "code":
+                    code_sources.append(attachment.content)
+                elif attachment.type == "problem":
+                    # TODO 查询题面并拼接到 current_state["messages"]。
+                    pass
+                elif attachment.type == "submission":
+                    # TODO 查询提交并拼接到 current_state["messages"]。
+                    pass
 
             # 更新messages表中用户消息
             await message_repository.insert(Message(
@@ -139,17 +107,14 @@ async def handle_chat(request: ChatRequest, token: str, user_id: int):
                 state=None,
             ), conn=conn)
 
-    # TODO 生成当前的 state
+    asyncio.create_task(run_task(
+        task_id=current_task_id,
+        message=request.message,
+        code_sources=code_sources,
+        current_state=current_state,
+    ))
 
-    for attachment in request.attachments:
-        if attachment.type == "code":
-            print("用户上传代码")
-            print(attachment.content)
-
-        elif attachment.type == "submission":
-            print("用户选择提交")
-            print(attachment.submission_id)
-
-        elif attachment.type == "problem":
-            print("用户选择题目")
-            print(attachment.problem_id)
+    return {
+        "conversation_id": conversation.id,
+        "task_id": current_task_id,
+    }
