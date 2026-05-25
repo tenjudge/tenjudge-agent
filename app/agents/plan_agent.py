@@ -1,5 +1,6 @@
 import inspect
 import json
+import logging
 from typing import Any, get_type_hints
 
 from langchain.messages import AnyMessage
@@ -8,6 +9,9 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, TypeAdapter
 
 from app.agents.models import LLM
+
+
+logger = logging.getLogger(__name__)
 
 
 class ToolSuggestion(BaseModel):
@@ -260,6 +264,7 @@ async def make_plan(
         else:
             unavailable_tool_names = _find_unavailable_tool_names(plan, available_tool_names)
             if not unavailable_tool_names:
+                logger.info("计划生成完成 plan=%s", format_plan_for_message(plan)[:2000])
                 return plan
 
             retry_note = (

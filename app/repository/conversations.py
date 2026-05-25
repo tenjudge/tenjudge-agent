@@ -81,6 +81,49 @@ class ConversationRepository:
 
         return Conversation.model_validate(row)
 
+    async def update_title_by_task(
+        self,
+        conversation_id: uuid.UUID,
+        turn_index: int,
+        task_id: uuid.UUID,
+        title: str,
+        conn=None,
+    ) -> Conversation | None:
+        now = datetime.now()
+        if conn is None:
+            async with pool.connection() as conn:
+                return await self.update_title_by_task(
+                    conversation_id,
+                    turn_index,
+                    task_id,
+                    title,
+                    conn=conn,
+                )
+
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                UPDATE conversations
+                SET title = %s, updated_at = %s
+                WHERE id = %s
+                  AND EXISTS (
+                      SELECT 1
+                      FROM tasks
+                      WHERE tasks.conversation_id = conversations.id
+                        AND tasks.turn_index = %s
+                        AND tasks.task_id = %s
+                  )
+                RETURNING id, user_id, title, updated_at, current_turn, status
+                """,
+                (title, now, conversation_id, turn_index, task_id),
+            )
+            row = await cur.fetchone()
+
+        if row is None:
+            return None
+
+        return Conversation.model_validate(row)
+
     async def update_current_turn(self, conversation_id: uuid.UUID, current_turn: int, conn=None) -> Conversation | None:
         now = datetime.now()
         if conn is None:

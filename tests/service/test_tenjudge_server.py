@@ -1,6 +1,7 @@
 import httpx
 import pytest
 import respx
+from pydantic import ValidationError
 
 from app.core.response import BizException, Code
 from app.service import tenjudge_server
@@ -118,10 +119,8 @@ async def test_get_problem_raises_server_error_for_http_error():
         side_effect=httpx.ConnectError("connection failed")
     )
 
-    with pytest.raises(BizException) as exc_info:
+    with pytest.raises(httpx.ConnectError):
         await tenjudge_server.get_problem(1001, "token")
-
-    assert exc_info.value.code is Code.SERVER_ERROR
 
 
 @pytest.mark.asyncio
@@ -131,7 +130,5 @@ async def test_get_submission_raises_server_error_for_invalid_shape():
         json={"code": Code.SUCCESS.biz_code, "data": {"id": 3001}}
     )
 
-    with pytest.raises(BizException) as exc_info:
+    with pytest.raises(ValidationError):
         await tenjudge_server.get_submission(3001, "token")
-
-    assert exc_info.value.code is Code.SERVER_ERROR

@@ -1,7 +1,9 @@
 import uuid
 import asyncio
 import json
+import re
 from typing import Any
+from collections.abc import AsyncIterator
 
 from datetime import datetime
 
@@ -25,6 +27,8 @@ from app.agents.orchestrator import (
     state_to_dict,
 )
 from app.core.db import pool
+from app.core.config import settings
+from app.core.redis import redis_client
 from app.core.response import BizException, Code
 from app.repository.conversations import Conversation, ConversationRepository
 from app.repository.messages import Message, MessageRepository
@@ -32,6 +36,79 @@ from app.repository.states import StateRepository
 from app.repository.tasks import Task, TaskRepository
 from app.service.runner import run_task
 from app.service.tenjudge_server import get_problem, get_submission
+
+
+STREAM_ID_PATTERN = re.compile(r"^\d+-\d+$")
+
+
+async def validate_chat_event_subscription(
+        task_id: uuid.UUID,
+        user_id: int,
+        last_event_id: str | None = None,
+) -> None:
+    # 1. 先校验断线重连游标，避免把非法值传给 Redis Stream。
+    if last_event_id is not None and not STREAM_ID_PATTERN.fullmatch(last_event_id):
+        raise BizException(Code.PARAM_ERROR, "last-event-id is invalid")
+
+    task_repository = TaskRepository()
+    conversation_repository = ConversationRepository()
+
+    # 2. GET 只接收 task_id，所以这里先反查任务，再通过任务找到所属会话。
+    task = await task_repository.get_by_task_id(task_id)
+    if task is None:
+        raise BizException(Code.NOT_FOUND, "task not found")
+
+    # 3. 用会话 owner 和当前鉴权用户做比较，防止用户订阅别人的任务流。
+    conversation = await conversation_repository.get_by_id(task.conversation_id)
+    if conversation is None:
+        raise BizException(Code.CONVERSATION_NOT_FOUND)
+    if conversation.user_id != user_id:
+        raise BizException(Code.FORBIDDEN)
+
+    # 4. Redis Stream 不存在时，表示任务事件流已经过期或不可订阅。
+    if not await redis_client.exists(f"agent:task:{task_id}:events"):
+        raise BizException(Code.NOT_FOUND, "task event stream expired")
+
+
+async def chat_event_generator(
+        task_id: uuid.UUID,
+        last_event_id: str | None = None,
+) -> AsyncIterator[str]:
+    # 1. 第一次订阅从 0-0 开始读取，断线重连时从 Last-Event-ID 后继续读取。
+    stream_key = f"agent:task:{task_id}:events"
+    last_id = last_event_id or "0-0"
+
+    while True:
+        # 2. 阻塞读取 Redis Stream；超时没有消息时发送 SSE comment 作为心跳。
+        stream_entries = await redis_client.xread(
+            streams={stream_key: last_id},
+            count=settings.REDIS_STREAM_READ_COUNT,
+            block=settings.REDIS_STREAM_READ_BLOCK_MS,
+        )
+
+        if not stream_entries:
+            yield ": ping\n\n"
+            continue
+
+        for _stream_name, messages in stream_entries:
+            for message_id, data in messages:
+                # 3. Redis 客户端已启用字符串解码；Stream 字段按 event/data 协议转成 SSE。
+                last_id = message_id
+                event = data.get("event", "message")
+                content = data.get("data", "")
+
+                # 4. SSE 多行 data 必须逐行加 data: 前缀，浏览器会把它们按换行合并。
+                lines = [
+                    f"id: {message_id}",
+                    f"event: {event}",
+                ]
+                for line in content.split("\n"):
+                    lines.append(f"data: {line}")
+                yield "\n".join(lines) + "\n\n"
+
+                # 5. done 是任务流结束标记；发给前端后关闭当前 generator。
+                if event == "done":
+                    return
 
 
 def _dump_problem_for_message(problem: Problem) -> str:
@@ -177,7 +254,7 @@ async def handle_chat(request: Any, token: str, user_id: int) -> dict[str, uuid.
             else:
                 # 1. 新建 conversation
                 conversation = Conversation(
-                    id=uuid.uuid4(),
+                    id=uuid.uuid7(),
                     user_id=user_id,
                     title=None,
                     updated_at=datetime.now(),
@@ -254,16 +331,26 @@ async def handle_chat(request: Any, token: str, user_id: int) -> dict[str, uuid.
             ), conn=conn)
 
             # 4. 更新task表（state留空）
-            current_task_id = uuid.uuid4()
+            current_task_id = uuid.uuid7()
             await task_repository.insert(Task(
                 conversation_id=conversation.id,
                 turn_index=current_turn_index,
                 task_id=current_task_id,
                 state=None,
             ), conn=conn)
+
+            # 5. POST 返回前先创建 Redis Stream，避免前端拿到 task_id 后订阅时 key 还不存在。
+            task_stream_key = f"agent:task:{current_task_id}:events"
+            await redis_client.xadd(task_stream_key, {
+                "event": "progress",
+                "data": "Preparing task",
+            })
+            await redis_client.expire(task_stream_key, settings.REDIS_STREAM_TTL_SECONDS)
     # _print_state(current_state)
 
     asyncio.create_task(run_task(
+        conversation_id=conversation.id,
+        turn_index=current_turn_index,
         task_id=current_task_id,
         message=request.message,
         code_sources=code_sources,

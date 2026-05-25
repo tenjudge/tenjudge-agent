@@ -53,6 +53,50 @@ class TaskRepository:
 
         return Task.model_validate(row)
 
+    async def get_by_task_id(self, task_id: uuid.UUID, conn=None) -> Task | None:
+        if conn is None:
+            async with pool.connection() as conn:
+                return await self.get_by_task_id(task_id, conn=conn)
+
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT conversation_id, turn_index, task_id, state
+                FROM tasks
+                WHERE task_id = %s
+                LIMIT 1
+                """,
+                (task_id,),
+            )
+            row = await cur.fetchone()
+
+        if row is None:
+            return None
+
+        return Task.model_validate(row)
+
+    async def update_state_by_task_id(self, task_id: uuid.UUID, state_id: uuid.UUID, conn=None) -> Task | None:
+        if conn is None:
+            async with pool.connection() as conn:
+                return await self.update_state_by_task_id(task_id, state_id, conn=conn)
+
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                UPDATE tasks
+                SET state = %s
+                WHERE task_id = %s
+                RETURNING conversation_id, turn_index, task_id, state
+                """,
+                (state_id, task_id),
+            )
+            row = await cur.fetchone()
+
+        if row is None:
+            return None
+
+        return Task.model_validate(row)
+
     async def delete_by_key(self, conversation_id: uuid.UUID, turn_index: int, conn=None) -> None:
         if conn is None:
             async with pool.connection() as conn:
@@ -95,6 +139,7 @@ CREATE TABLE tasks (
     task_id UUID NOT NULL,
     state UUID,
 
-    PRIMARY KEY (conversation_id, turn_index)
+    PRIMARY KEY (conversation_id, turn_index),
+    UNIQUE (task_id)
 );
 '''
