@@ -28,9 +28,13 @@ uv run uvicorn app.main:app --reload
 - `app/agents/title_agent.py` contains `summarize_title`, which uses structured LLM output to create a short display title from the first user message.
 - `app/agents/plan_agent.py` contains `make_plan`, which uses `LLM("medium")` structured output to create English execution plans from conversation messages, optional planning guidance, and LangChain tool metadata.
 - `app/agents/orchestrator.py` owns the chat agent `State` TypedDict definition, state serialization helpers, agent tool entrypoint, LangGraph nodes, and the compiled `agent` graph.
+- `app/tools/database.py` contains the `query_oj_database` LangChain tool for read-only SQL queries over restricted OJ views.
+- `app/tools/misc.py` contains small LangChain tools such as `get_current_time` and `get_current_user_id`.
 - `app/repository/messages.py` contains message persistence code; messages use `(conversation_id, turn_index, role)` as the primary key and expose `get_by_key`, `delete_by_key`, and `delete_from_turn`.
 - `app/repository/tasks.py` contains task persistence code; tasks use `(conversation_id, turn_index)` as the primary key and expose `get_by_key`, `get_by_task_id`, `delete_by_key`, and `delete_from_turn`.
 - `app/repository/states.py` contains LangGraph state persistence code and exposes `delete_by_ids` for deleting task-owned state snapshots.
+- `app/repository/agent_schema.sql` contains this project's `conversations`, `messages`, `tasks`, and `states` table DDL without database foreign keys.
+- `app/repository/agent_tool_views.sql` contains the `agent_read` schema views and restricted `tenjudge_agent_tool` role grants for database tool access.
 - `app/core/response.py` contains unified response and exception handling code.
 - `app/core/config.py` contains configuration code.
 - `app/core/db.py` contains database lifecycle code.
@@ -63,6 +67,7 @@ uv run uvicorn app.main:app --reload
 - Title generation failures are logged and do not affect the main agent task or `done` event timing; because SSE closes on `done`, a slow title event may be written after the current SSE connection has ended.
 - Code attachment summarization uses `LLM("low")`, receives complete historical messages plus the current user message, returns English descriptions, and preserves the input code order.
 - `run_task` appends summarized code attachments to both `state["code_files"]` and `state["messages"]` before appending the current user message.
+- Before `run_task` calls `make_plan`, it emits Redis `progress` with English data `Planning response`.
 - `run_task` calls `make_plan` with `app.agents.orchestrator.AGENT_TOOLS` after appending the current user message, then appends the formatted internal plan as a `SystemMessage` to long-term `state["messages"]`.
 - `run_task` executes `app.agents.orchestrator.agent.astream` with stream modes `messages`, `custom`, and `values`.
 - `run_task` forwards custom stream chunks as Redis `progress` events and `agent_node` message chunks as Redis `message` events.
@@ -71,7 +76,14 @@ uv run uvicorn app.main:app --reload
 - On failure, `run_task` persists a failed state with an `AIMessage`, inserts a failed `agent` message, marks the conversation `finished`, and emits Redis `failed` then `done`.
 - Planning uses LangChain `BaseTool` objects directly; tool names, descriptions, input schemas, and return type schemas are extracted for `plan_agent`, while `@tool(parse_docstring=True)` is recommended but not required.
 - The LangGraph orchestration uses a simple ReAct loop: `START -> agent_node -> tools_node -> agent_node`, and routes directly to `END` when the agent returns no tool calls.
-- `app.agents.orchestrator.AGENT_TOOLS` is the shared future entrypoint for business tools and is currently an empty list until real tools are implemented.
+- `agent_node` emits a custom progress chunk with English data `Thinking` before invoking the LLM.
+- The LangGraph `tools_node` wraps tool calls and emits English custom progress chunks before tool execution, such as `Querying database`, `Checking current time`, and `Checking current user`.
+- `app.agents.orchestrator.AGENT_TOOLS` is the shared entrypoint for business tools and currently includes `query_oj_database`, `get_current_time`, and `get_current_user_id`.
+- `query_oj_database` accepts one read-only `SELECT` / `WITH SELECT` query and returns JSON containing `columns`, `rows`, `row_count`, `truncated`, and `sql`.
+- `query_oj_database` should connect using `Settings.AGENT_DB_TOOL_DATABASE_URL`, which must point at the restricted `tenjudge_agent_tool` database role.
+- Database tool result limits are module constants in `app/tools/database.py`: `AGENT_DB_TOOL_MAX_ROWS`, `AGENT_DB_TOOL_STATEMENT_TIMEOUT_MS`, `AGENT_DB_TOOL_MAX_FIELD_CHARS`, and `AGENT_DB_TOOL_MAX_RESULT_CHARS`.
+- Database tool SQL access is limited to `agent_read` views: `problem`, `problem_tag`, `users`, `contest`, `contest_problem`, and `contest_participant`; submission tables are intentionally unavailable.
+- `get_current_time` returns the current time in `Asia/Shanghai`; `get_current_user_id` reads the authenticated user id from injected LangGraph state.
 - `finish_node` has been removed; user-facing output is streamed from `agent_node` message chunks.
 - `get_init_state()` initializes `state["messages"]` with `SystemMessage("You are the TenJudge online judge platform assistant.")`.
 - ReAct rounds are capped by `app.core.config.Settings.AGENT_MAX_REACT_ROUNDS`, counted as `AIMessage` results since the latest `HumanMessage`; the near-limit warning threshold is `AGENT_REACT_ROUND_WARNING_REMAINING`.

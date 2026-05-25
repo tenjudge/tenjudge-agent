@@ -131,6 +131,7 @@ async def run_task(
         user_message_appended = True
 
         # 4. 基于当前完整上下文和主 agent 工具列表生成内部计划，并写入长期 messages。
+        await _publish_task_event(task_id, "progress", "Planning response")
         plan = await make_plan(
             messages=current_state["messages"],
             available_tools=AGENT_TOOLS,

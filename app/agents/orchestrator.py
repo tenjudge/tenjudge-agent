@@ -1,10 +1,12 @@
 import operator
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain.messages import AnyMessage
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, messages_from_dict, messages_to_dict
 from langchain_core.tools import BaseTool
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from typing_extensions import TypedDict, Annotated
@@ -12,6 +14,8 @@ from typing_extensions import TypedDict, Annotated
 from app.agents.context import CodeFileContext, ProblemContext, SubmissionContext
 from app.agents.models import LLM
 from app.core.config import settings
+from app.tools.database import query_oj_database
+from app.tools.misc import get_current_time, get_current_user_id
 
 
 logger = logging.getLogger(__name__)
@@ -104,8 +108,46 @@ def state_from_dict(state: dict[str, Any]) -> State:
 ##### LangGraph 节点定义 ##############################################
 
 # 主 agent 可使用的业务工具列表，planner 和 graph 后续应共用这个入口。
-# TODO 接入题目、提交、代码文件等真实业务工具后，在这里统一维护。
-AGENT_TOOLS: list[BaseTool] = []
+# TODO 接入题目、提交、代码文件等更多业务工具后，在这里统一维护。
+AGENT_TOOLS: list[BaseTool] = [
+    query_oj_database,
+    get_current_time,
+    get_current_user_id,
+]
+
+TOOL_PROGRESS_MESSAGES = {
+    "query_oj_database": "Querying database",
+    "get_current_time": "Checking current time",
+    "get_current_user_id": "Checking current user",
+}
+
+
+def _write_progress_event(message: str) -> None:
+    try:
+        get_stream_writer()(message)
+    except RuntimeError:
+        logger.debug("Skip progress event outside stream context: %s", message)
+
+
+def _get_tool_call_name(request: Any) -> str | None:
+    tool = getattr(request, "tool", None)
+    tool_name = getattr(tool, "name", None)
+    if tool_name:
+        return tool_name
+
+    tool_call = getattr(request, "tool_call", None)
+    if isinstance(tool_call, dict):
+        return tool_call.get("name")
+    return getattr(tool_call, "name", None)
+
+
+async def _wrap_tool_call_with_progress(
+        request: Any,
+        call_tool: Callable[[Any], Awaitable[Any]],
+) -> Any:
+    tool_name = _get_tool_call_name(request)
+    _write_progress_event(TOOL_PROGRESS_MESSAGES.get(tool_name, "Using tool"))
+    return await call_tool(request)
 
 
 # 从最后一条消息向前扫描到最近的 HumanMessage，统计本轮已经发生的模型推理轮数。
@@ -123,6 +165,7 @@ def _current_turn_react_round_count(state: State) -> int:
 async def agent_node(state: State) -> dict[str, list[AnyMessage]]:
     react_round = _current_turn_react_round_count(state) + 1
     tools = [] if _current_turn_react_round_count(state) >= settings.AGENT_MAX_REACT_ROUNDS else AGENT_TOOLS
+    _write_progress_event("Thinking")
     logger.info(
         "agent_node开始调用模型 react_round=%s message_count=%s tool_count=%s",
         react_round,
@@ -156,7 +199,10 @@ def route_after_agent(state: State) -> str:
 
 workflow = StateGraph(State)
 workflow.add_node("agent_node", agent_node)
-workflow.add_node("tools_node", ToolNode(AGENT_TOOLS))
+workflow.add_node("tools_node", ToolNode(
+    AGENT_TOOLS,
+    awrap_tool_call=_wrap_tool_call_with_progress,
+))
 
 workflow.add_edge(START, "agent_node")
 workflow.add_conditional_edges(

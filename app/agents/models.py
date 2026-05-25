@@ -5,21 +5,60 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 
+# models = {
+#     "low": ChatOpenAI(
+#         model="qwen/qwen3.5-flash-02-23",
+#         api_key=settings.OPENROUTER_API_KEY,
+#         base_url="https://openrouter.ai/api/v1",
+#     ),
+#     "medium": ChatOpenAI(
+#         model="qwen/qwen3.5-flash-02-23",
+#         api_key=settings.OPENROUTER_API_KEY,
+#         base_url="https://openrouter.ai/api/v1",
+#     ),
+#     "high": ChatOpenAI(
+#         model="qwen/qwen3.5-flash-02-23",
+#         api_key=settings.OPENROUTER_API_KEY,
+#         base_url="https://openrouter.ai/api/v1",
+#     ),
+# }
+
+# models = {
+#     "low": ChatOpenAI(
+#         model="deepseek-v4-flash",
+#         api_key=settings.DEEPSEEK_API_KEY,
+#         base_url="https://api.deepseek.com",
+#     ),
+#     "medium": ChatOpenAI(
+#         model="deepseek-v4-pro",
+#         api_key=settings.DEEPSEEK_API_KEY,
+#         base_url="https://api.deepseek.com",
+#         extra_body={"thinking": {"type": "disabled"}},
+#     ),
+#     "high": ChatOpenAI(
+#         model="deepseek-v4-pro",
+#         api_key=settings.DEEPSEEK_API_KEY,
+#         base_url="https://api.deepseek.com",
+#         extra_body={"thinking": {"type": "enabled"}},
+#         reasoning_effort="high",
+#     ),
+# }
+
 models = {
     "low": ChatOpenAI(
-        model="deepseek/deepseek-v4-flash",
-        api_key=settings.OPENROUTER_API_KEY,
-        base_url="https://openrouter.ai/api/v1",
+        model="qwen-plus",
+        api_key=settings.DASHSCOPE_API_KEY,
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     ),
     "medium": ChatOpenAI(
-        model="deepseek/deepseek-v4-pro",
-        api_key=settings.OPENROUTER_API_KEY,
-        base_url="https://openrouter.ai/api/v1",
+        model="qwen-plus",
+        api_key=settings.DASHSCOPE_API_KEY,
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     ),
     "high": ChatOpenAI(
-        model="deepseek/deepseek-v4-pro",
-        api_key=settings.OPENROUTER_API_KEY,
-        base_url="https://openrouter.ai/api/v1",
+        model="qwen-plus",
+        api_key=settings.DASHSCOPE_API_KEY,
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     ),
 }
 

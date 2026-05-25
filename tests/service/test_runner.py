@@ -180,12 +180,13 @@ async def test_run_task_appends_code_files_and_messages(monkeypatch):
 
     assert calls["stream_mode"] == ["messages", "custom", "values"]
     assert fake_redis.events == [
+        (f"agent:task:{task_id}:events", {"event": "progress", "data": "Planning response"}),
         (f"agent:task:{task_id}:events", {"event": "progress", "data": "Analyzing context"}),
         (f"agent:task:{task_id}:events", {"event": "message", "data": "final "}),
         (f"agent:task:{task_id}:events", {"event": "message", "data": "answer"}),
         (f"agent:task:{task_id}:events", {"event": "done", "data": ""}),
     ]
-    assert fake_redis.expires == [(f"agent:task:{task_id}:events", 60)] * 4
+    assert fake_redis.expires == [(f"agent:task:{task_id}:events", 60)] * 5
     assert calls["agent_message"].conversation_id == conversation_id
     assert calls["agent_message"].turn_index == 1
     assert calls["agent_message"].role == "agent"

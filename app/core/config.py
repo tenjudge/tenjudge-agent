@@ -5,6 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
 
     OPENROUTER_API_KEY: str = ""
+    DEEPSEEK_API_KEY: str = ""
+    DASHSCOPE_API_KEY: str = ""
     DATABASE_URL: str = ""
     TENJUDGE_SERVER_BASE_URL: str = ""
     REDIS_URL: str = ""
@@ -13,6 +15,7 @@ class Settings(BaseSettings):
     REDIS_STREAM_READ_COUNT: int = 10
     AGENT_MAX_REACT_ROUNDS: int = 8
     AGENT_REACT_ROUND_WARNING_REMAINING: int = 2
+    AGENT_DB_TOOL_DATABASE_URL: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",
