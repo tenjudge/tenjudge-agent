@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,6 +13,33 @@ class CodeFile(BaseModel):
 class CodeFileContext(BaseModel):
     id: str
     file: CodeFile
+
+
+def normalize_code_content(content: str) -> str:
+    # 1. state 内统一使用 LF，避免模型参数和源码物理换行不同导致精确替换失败。
+    return content.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def get_code_file_contexts(state: dict[str, Any]) -> list[CodeFileContext]:
+    contexts: list[CodeFileContext] = []
+    for item in state.get("code_files", []):
+        if isinstance(item, CodeFileContext):
+            contexts.append(item)
+        else:
+            contexts.append(CodeFileContext.model_validate(item))
+    return contexts
+
+
+def find_code_file_context(state: dict[str, Any], code_file_id: str) -> CodeFileContext | None:
+    for code_file_context in get_code_file_contexts(state):
+        if code_file_context.id == code_file_id:
+            return code_file_context
+    return None
+
+
+def format_available_code_file_ids(state: dict[str, Any]) -> str:
+    available_ids = [context.id for context in get_code_file_contexts(state)]
+    return ", ".join(available_ids) if available_ids else "none"
 
 
 class Problem(BaseModel):

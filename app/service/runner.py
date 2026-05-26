@@ -5,7 +5,7 @@ import asyncio
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.agents.code_summarize_agent import summarize_code_files
-from app.agents.context import CodeFileContext
+from app.agents.context import CodeFileContext, normalize_code_content
 from app.agents.orchestrator import AGENT_TOOLS, State, agent, next_code_file_context_id, state_to_dict
 from app.agents.plan_agent import format_plan_for_message, make_plan
 from app.agents.title_agent import summarize_title
@@ -109,7 +109,10 @@ async def run_task(
         ))
 
     try:
-        # 1. 先处理用户上传的代码源码，生成 CodeFile 并追加到 current_state["code_files"]。
+        # 1. 代码内容进入 state 前统一换行，保证后续 exact replace 使用同一种文本表示。
+        code_sources = [normalize_code_content(source) for source in code_sources]
+
+        # 2. 先处理用户上传的代码源码，生成 CodeFile 并追加到 current_state["code_files"]。
         history_messages = list(current_state["messages"])  # 当前轮自然语言消息还没进入 state，单独传给 summarizer。
         code_files = await summarize_code_files(
             code_sources=code_sources,
@@ -117,7 +120,7 @@ async def run_task(
             history_messages=history_messages,
         )
 
-        # 2. 每份代码都分配稳定的 code_file_N，同时写入 state 和 messages。
+        # 3. 每份代码都分配稳定的 code_file_N，同时写入 state 和 messages。
         for code_file in code_files:
             code_file_context = CodeFileContext(
                 id=next_code_file_context_id(current_state),  # 这里会同步推进 code_file_cnt。
@@ -126,19 +129,18 @@ async def run_task(
             current_state["code_files"].append(code_file_context)
             current_state["messages"].append(_build_code_attachment_message(code_file_context))
 
-        # 3. 再追加本轮用户自然语言消息，保证 agent 看到的上下文顺序稳定。
+        # 4. 再追加本轮用户自然语言消息，保证 agent 看到的上下文顺序稳定。
         current_state["messages"].append(HumanMessage(content=message))
         user_message_appended = True
 
-        # 4. 基于当前完整上下文和主 agent 工具列表生成内部计划，并写入长期 messages。
-        await _publish_task_event(task_id, "progress", "Planning response")
+        # 5. 基于当前完整上下文和主 agent 工具列表生成内部计划，并写入长期 messages。
         plan = await make_plan(
             messages=current_state["messages"],
             available_tools=AGENT_TOOLS,
         )
         current_state["messages"].append(SystemMessage(content=format_plan_for_message(plan)))
 
-        # 5. 流式执行主 agent：custom 转 progress，agent_node 的 messages 转回答流。
+        # 6. 流式执行主 agent：custom 转 progress，agent_node 的 messages 转回答流。
         await _publish_task_event(task_id, "progress", "Thinking")
         final_answer = ""
         final_state = current_state
@@ -165,7 +167,7 @@ async def run_task(
                     final_answer = str(state_message.content)
                     break
 
-        # 6. 正常完成后落库最终 state、agent 消息和会话状态。
+        # 7. 正常完成后落库最终 state、agent 消息和会话状态。
         state_id = uuid.uuid7()
         state_repository = StateRepository()
         task_repository = TaskRepository()

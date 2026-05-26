@@ -23,13 +23,14 @@ uv run uvicorn app.main:app --reload
 - `app/router/chat.py` defines the `/agent/chat` route, owns the chat request/response DTO models, and exposes `/agent/chat/{task_id}/events` for SSE subscription.
 - `app/service/chat.py` contains chat service code.
 - `app/service/tenjudge_server.py` contains outbound HTTP calls to the TenJudge server, including current-user, problem, submission lookup, judge submission, and judge-result polling.
-- `app/agents/context.py` contains agent context models such as `CodeFile`, `CodeFileContext`, `Problem`, `ProblemContext`, `Submission`, `SubmissionDetail`, and `SubmissionContext`.
+- `app/agents/context.py` contains agent context models such as `CodeFile`, `CodeFileContext`, `Problem`, `ProblemContext`, `Submission`, `SubmissionDetail`, and `SubmissionContext`, plus shared code file helpers including LF newline normalization and state lookup helpers for `CodeFileContext`.
 - `app/agents/code_summarize_agent.py` contains `summarize_code_files`, which uses structured LLM output to turn raw code attachments plus conversation context into `CodeFile` objects.
 - `app/agents/title_agent.py` contains `summarize_title`, which uses structured LLM output to create a short display title from the first user message.
 - `app/agents/plan_agent.py` contains `make_plan`, which uses `LLM("medium")` structured output to create English execution plans from conversation messages, optional planning guidance, and LangChain tool metadata.
 - `app/agents/orchestrator.py` owns the chat agent `State` TypedDict definition, state serialization helpers, agent tool entrypoint, LangGraph nodes, and the compiled `agent` graph.
 - `app/tools/database.py` contains the `query_oj_database` LangChain tool for read-only SQL queries over restricted OJ views.
 - `app/tools/judge.py` contains the `submit_code_for_judge` LangChain tool for submitting an existing state code file to TenJudge judge and briefly polling for the result.
+- `app/tools/code_file.py` contains LangChain tools for creating, replacing, overwriting, metadata-updating, and save-as editing state code files.
 - `app/tools/misc.py` contains small LangChain tools such as `get_current_time` and `get_current_user_id`.
 - `app/repository/messages.py` contains message persistence code; messages use `(conversation_id, turn_index, role)` as the primary key and expose `get_by_key`, `delete_by_key`, and `delete_from_turn`.
 - `app/repository/tasks.py` contains task persistence code; tasks use `(conversation_id, turn_index)` as the primary key and expose `get_by_key`, `get_by_task_id`, `delete_by_key`, and `delete_from_turn`.
@@ -47,7 +48,7 @@ uv run uvicorn app.main:app --reload
 - SSE output is implemented from Redis Stream reads.
 - `task_id` is used by the later `GET` request to listen for SSE output and is part of the Redis key `agent:task:{task_id}:events`.
 - Redis Stream event fields are `event` and `data`; supported event values are `progress`, `message`, `title`, `failed`, and `done`, and `data` is a plain string.
-- `handle_chat` creates the task Redis Stream before returning from `POST /agent/chat` by writing `progress` with data `Preparing task`.
+- `handle_chat` creates the task Redis Stream before returning from `POST /agent/chat` by writing `progress` with data `Planning`.
 - Redis Stream keys use `app.core.config.Settings.REDIS_STREAM_TTL_SECONDS` as their TTL; `GET /agent/chat/{task_id}/events` returns `NOT_FOUND` when the stream key no longer exists.
 - SSE subscription validates ownership by looking up the task by `task_id`, loading its conversation, and comparing `conversation.user_id` with the authenticated TenJudge user id.
 - SSE subscription supports `Last-Event-ID` using Redis Stream entry ids and sends `: ping` heartbeat comments on Redis read timeouts.
@@ -64,14 +65,14 @@ uv run uvicorn app.main:app --reload
 - TenJudge judge submission uses `POST /submit/judge` with `isAgent = true`, sends only `problemId`, `language`, `code`, and `isAgent`, and does not send `contestId`.
 - `submit_judge_and_wait` polls `GET /submit/{submission_id}` every 1 second by default, treats only `PENDING` as unfinished, and returns `JudgeWaitResult(success=False, submission=latest_submission, message=...)` if the submission is still pending after 20 seconds.
 - If judge submission succeeds but submission lookup returns a TenJudge business failure, `submit_judge_and_wait` returns `JudgeWaitResult(success=False, submission=None, message=...)` instead of raising that lookup `BizException`.
-- `handle_chat` collects code attachment source text into `code_sources: list[str]` and starts `run_task` asynchronously after the transaction.
+- `handle_chat` collects code attachment source text into `code_sources: list[str]`, normalizes code attachment and submission-code line endings to LF, and starts `run_task` asynchronously after the transaction.
 - `run_task` receives `conversation_id`, `turn_index`, `task_id`, `code_sources: list[str]`, and the current input state; it does not receive or interpret raw chat attachments.
+- `run_task` normalizes `code_sources` line endings to LF before summarizing and appending them to `state["code_files"]`.
 - On turn 1, `run_task` starts a non-blocking background title task that calls `summarize_title(message)`, updates `conversations.title`, and emits Redis `title` with the generated title as plain-string `data`.
 - Title updates are guarded by `(conversation_id, turn_index, task_id)` so a stale first-turn background task cannot overwrite the title after the user restarts from turn 1.
 - Title generation failures are logged and do not affect the main agent task or `done` event timing; because SSE closes on `done`, a slow title event may be written after the current SSE connection has ended.
 - Code attachment summarization uses `LLM("low")`, receives complete historical messages plus the current user message, returns English descriptions, and preserves the input code order.
 - `run_task` appends summarized code attachments to both `state["code_files"]` and `state["messages"]` before appending the current user message.
-- Before `run_task` calls `make_plan`, it emits Redis `progress` with English data `Planning response`.
 - `run_task` calls `make_plan` with `app.agents.orchestrator.AGENT_TOOLS` after appending the current user message, then appends the formatted internal plan as a `SystemMessage` to long-term `state["messages"]`.
 - Before `run_task` enters the compiled LangGraph agent, it emits Redis `progress` with English data `Thinking`.
 - `run_task` executes `app.agents.orchestrator.agent.astream` with stream modes `messages`, `custom`, and `values`.
@@ -83,8 +84,8 @@ uv run uvicorn app.main:app --reload
 - Successful planning is logged with a Chinese marker line `【计划完成】`, followed by the full formatted internal plan on later lines.
 - The LangGraph orchestration uses a simple ReAct loop: `START -> agent_node -> tools_node -> agent_node`, and routes directly to `END` when the agent returns no tool calls.
 - `agent_node` does not log model-call start metadata; after the model returns, it logs non-empty model content with `【模型输出】` followed by the full content on later lines, and logs each requested tool call separately as `【工具调用】<tool_name>`.
-- The LangGraph `tools_node` wraps tool calls and emits English custom progress chunks before tool execution, such as `Querying database`, `Submitting code for judging`, `Checking current time`, and `Checking current user`.
-- `app.agents.orchestrator.AGENT_TOOLS` is the shared entrypoint for business tools and currently includes `query_oj_database`, `submit_code_for_judge`, `get_current_time`, and `get_current_user_id`.
+- The LangGraph `tools_node` wraps tool calls and emits English custom progress chunks before tool execution, such as `Querying database`, `Submitting code for judging`, `Creating code file`, `Updating code file`, `Overwriting code file`, `Updating code file metadata`, `Checking current time`, and `Checking current user`.
+- `app.agents.orchestrator.AGENT_TOOLS` is the shared entrypoint for business tools and currently includes `query_oj_database`, `submit_code_for_judge`, `create_code_file`, `replace_code_file_content`, `replace_code_file_content_as_new`, `overwrite_code_file`, `update_code_file_metadata`, `get_current_time`, and `get_current_user_id`.
 - `query_oj_database` accepts one read-only `SELECT` / `WITH SELECT` query and returns JSON containing `columns`, `rows`, `row_count`, `truncated`, and `sql`.
 - `query_oj_database` should connect using `Settings.AGENT_DB_TOOL_DATABASE_URL`, which must point at the restricted `tenjudge_agent_tool` database role.
 - Database tool result limits are module constants in `app/tools/database.py`: `AGENT_DB_TOOL_MAX_ROWS`, `AGENT_DB_TOOL_STATEMENT_TIMEOUT_MS`, `AGENT_DB_TOOL_MAX_FIELD_CHARS`, and `AGENT_DB_TOOL_MAX_RESULT_CHARS`.
@@ -92,9 +93,17 @@ uv run uvicorn app.main:app --reload
 - `submit_code_for_judge` accepts `code_file_id` and `problem_id` only; it reads source code, language, and token from injected LangGraph state.
 - `submit_code_for_judge` does not write the new submission back to `state["submissions"]`; it returns a JSON string with `success`, `message`, `code_file_id`, `problem_id`, `language`, and `submission`, with `submission.code` omitted.
 - `submit_code_for_judge.success` means the tool obtained a final judge result, not that the submitted code was accepted; final verdicts such as `WRONG_ANSWER` still return `success = true`.
+- Code file write tools return `langgraph.types.Command` updates with a `ToolMessage` JSON payload and update `state["code_files"]`/`state["code_file_cnt"]` when successful.
+- Code file tool success payloads return the complete current file content plus `code_file_id`, `description`, and `language`; failure payloads use `success=false` and a natural-language `message` without mutating code files.
+- Code file tool descriptions mark returned identifiers and metadata as private execution context for later tool calls only; success `message` values intentionally avoid internal identifiers so the user-facing model is less likely to expose them.
+- `create_code_file` requires non-empty `description`, `language`, and non-empty `content`, creates the next `code_file_N`, and normalizes content line endings to LF.
+- `replace_code_file_content` edits an existing `code_file_id` by exact `old_string`/`new_string` replacement, supports `replace_all=false` by default, fails without mutation on missing or duplicate matches unless `replace_all=true`, and allows empty `old_string` only when the target file content is empty.
+- `replace_code_file_content_as_new` applies the same exact replacement rules to a source code file but appends the result as a new `code_file_N`; `description` and `language` are required for the new file.
+- `overwrite_code_file` replaces an existing file with non-empty complete `content` and optional metadata updates.
+- `update_code_file_metadata` changes only `description` and/or `language`, requires at least one of them, and keeps source content unchanged except LF newline normalization.
 - `get_current_time` returns the current time in `Asia/Shanghai`; `get_current_user_id` reads the authenticated user id from injected LangGraph state.
 - `finish_node` has been removed; user-facing output is streamed from `agent_node` message chunks.
-- `get_init_state()` initializes `state["messages"]` with `SystemMessage("You are the TenJudge online judge platform assistant.")`.
+- `get_init_state()` initializes `state["messages"]` with `INITIAL_SYSTEM_PROMPT`, which identifies the assistant as the TenJudge platform assistant and tells the user-facing agent to answer in the user's latest-message language, separate private execution context from user-facing answers, treat the internal code file system as an execution aid unknown to users, avoid hidden workflow narration and unnecessary permission prompts, avoid menus of next steps, and not copy internal English planning/tool wording into final answers.
 - ReAct rounds are capped by `app.core.config.Settings.AGENT_MAX_REACT_ROUNDS`, counted as `AIMessage` results since the latest `HumanMessage`; the near-limit warning threshold is `AGENT_REACT_ROUND_WARNING_REMAINING`.
 - Repository methods support an optional external database connection via `conn=...`; pass the same connection to multiple repository calls when they must share one transaction.
 

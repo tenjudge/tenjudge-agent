@@ -5,23 +5,25 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 
-# models = {
-#     "low": ChatOpenAI(
-#         model="qwen/qwen3.5-flash-02-23",
-#         api_key=settings.OPENROUTER_API_KEY,
-#         base_url="https://openrouter.ai/api/v1",
-#     ),
-#     "medium": ChatOpenAI(
-#         model="qwen/qwen3.5-flash-02-23",
-#         api_key=settings.OPENROUTER_API_KEY,
-#         base_url="https://openrouter.ai/api/v1",
-#     ),
-#     "high": ChatOpenAI(
-#         model="qwen/qwen3.5-flash-02-23",
-#         api_key=settings.OPENROUTER_API_KEY,
-#         base_url="https://openrouter.ai/api/v1",
-#     ),
-# }
+models = {
+    "low": ChatOpenAI(
+        model="deepseek/deepseek-v4-flash",
+        api_key=settings.OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1",
+        extra_body={"reasoning": {"effort": "none"}}
+    ),
+    "medium": ChatOpenAI(
+        model="deepseek/deepseek-v4-pro",
+        api_key=settings.OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1",
+        extra_body={"reasoning": {"effort": "none"}}
+    ),
+    "high": ChatOpenAI(
+        model="deepseek/deepseek-v4-pro",
+        api_key=settings.OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1",
+    ),
+}
 
 # models = {
 #     "low": ChatOpenAI(
@@ -44,23 +46,23 @@ from app.core.config import settings
 #     ),
 # }
 
-models = {
-    "low": ChatOpenAI(
-        model="qwen-plus",
-        api_key=settings.DASHSCOPE_API_KEY,
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    ),
-    "medium": ChatOpenAI(
-        model="qwen-plus",
-        api_key=settings.DASHSCOPE_API_KEY,
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    ),
-    "high": ChatOpenAI(
-        model="qwen-plus",
-        api_key=settings.DASHSCOPE_API_KEY,
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    ),
-}
+# models = {
+#     "low": ChatOpenAI(
+#         model="qwen-plus",
+#         api_key=settings.DASHSCOPE_API_KEY,
+#         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+#     ),
+#     "medium": ChatOpenAI(
+#         model="qwen-plus",
+#         api_key=settings.DASHSCOPE_API_KEY,
+#         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+#     ),
+#     "high": ChatOpenAI(
+#         model="qwen-plus",
+#         api_key=settings.DASHSCOPE_API_KEY,
+#         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+#     ),
+# }
 
 class LLM:
     def __init__(self, level: Literal["low", "medium", "high"]):

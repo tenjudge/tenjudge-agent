@@ -14,6 +14,7 @@ from typing_extensions import TypedDict, Annotated
 from app.agents.context import CodeFileContext, ProblemContext, SubmissionContext
 from app.agents.models import LLM
 from app.core.config import settings
+from app.tools.code_file import CODE_FILE_TOOLS
 from app.tools.database import query_oj_database
 from app.tools.judge import submit_code_for_judge
 from app.tools.misc import get_current_time, get_current_user_id
@@ -23,7 +24,17 @@ logger = logging.getLogger(__name__)
 
 ##### State 定义与相关函数 ##############################################
 
-INITIAL_SYSTEM_PROMPT = "You are the TenJudge online judge platform assistant."
+INITIAL_SYSTEM_PROMPT = """You are the TenJudge online judge platform assistant.
+
+User-facing answer rules:
+1. Answer the user's latest request directly. Use the same primary language as the user's latest message unless the user explicitly asks for another language.
+2. Separate private execution context from user-facing answers. Tool outputs, state, metadata, planning notes, internal identifiers, and internal workflow details are for reasoning and actions only. Do not expose their names, ids, wording, or mechanics to the user.
+3. The internal code file system is only an execution aid. The user is not aware of it and should not be asked to manage, select, save, reopen, or continue from internally stored files.
+4. Present code work in user-visible terms. If code is created or changed, show the resulting code when useful, or explain the relevant changes directly. Do not describe internal storage, internal file handles, or tool-side bookkeeping.
+5. Act when the user has asked for an action you can perform. Do not narrate hidden workflow steps before doing them, and do not ask for permission to perform an action already requested.
+6. Do not offer menus of possible next steps. Suggest a next action only when it is directly relevant to the user's request. Ask a follow-up question only when required to continue or when a user-visible decision is genuinely needed.
+7. Internal planning and tool text may be in English. Do not copy that wording or language into the final answer; let the user's request determine the answer style and language.
+"""
 
 
 # LangGraph 持久化和节点共享的状态结构。
@@ -109,10 +120,11 @@ def state_from_dict(state: dict[str, Any]) -> State:
 ##### LangGraph 节点定义 ##############################################
 
 # 主 agent 可使用的业务工具列表，planner 和 graph 后续应共用这个入口。
-# TODO 接入题目、提交、代码文件等更多业务工具后，在这里统一维护。
+# TODO 接入题目、提交等更多业务工具后，在这里统一维护。
 AGENT_TOOLS: list[BaseTool] = [
     query_oj_database,
     submit_code_for_judge,
+    *CODE_FILE_TOOLS,
     get_current_time,
     get_current_user_id,
 ]
@@ -120,6 +132,11 @@ AGENT_TOOLS: list[BaseTool] = [
 TOOL_PROGRESS_MESSAGES = {
     "query_oj_database": "Querying database",
     "submit_code_for_judge": "Submitting code for judging",
+    "create_code_file": "Creating code file",
+    "replace_code_file_content": "Updating code file",
+    "replace_code_file_content_as_new": "Creating revised code file",
+    "overwrite_code_file": "Overwriting code file",
+    "update_code_file_metadata": "Updating code file metadata",
     "get_current_time": "Checking current time",
     "get_current_user_id": "Checking current user",
 }

@@ -6,7 +6,7 @@ from langgraph.prebuilt import InjectedState
 from pydantic import BaseModel, Field
 from typing_extensions import Annotated
 
-from app.agents.context import CodeFileContext, Submission
+from app.agents.context import Submission, find_code_file_context, format_available_code_file_ids
 from app.service.tenjudge_server import submit_judge_and_wait
 
 
@@ -49,23 +49,6 @@ def _format_result(
     }, ensure_ascii=False, default=str)
 
 
-def _get_code_file_contexts(state: dict) -> list[CodeFileContext]:
-    contexts: list[CodeFileContext] = []
-    for item in state.get("code_files", []):
-        if isinstance(item, CodeFileContext):
-            contexts.append(item)
-        else:
-            contexts.append(CodeFileContext.model_validate(item))
-    return contexts
-
-
-def _find_code_file_context(state: dict, code_file_id: str) -> CodeFileContext | None:
-    for code_file_context in _get_code_file_contexts(state):
-        if code_file_context.id == code_file_id:
-            return code_file_context
-    return None
-
-
 TOOL_DESCRIPTION = """Submit one existing code file from the current agent state to the TenJudge judge system.
 Use this tool when a state code file should be evaluated against a TenJudge problem, including checking user-provided code or validating code produced or revised during the conversation.
 The input code_file_id must be one of the code_file_N identifiers already present in the conversation/state.
@@ -85,13 +68,14 @@ async def submit_code_for_judge(
         state: Annotated[dict, InjectedState],
 ) -> str:
     """Submit a state code file to TenJudge and wait briefly for the judge result."""
-    code_file_context = _find_code_file_context(state, code_file_id)
+    code_file_context = find_code_file_context(state, code_file_id)
     if code_file_context is None:
-        available_ids = [context.id for context in _get_code_file_contexts(state)]
-        available_text = ", ".join(available_ids) if available_ids else "none"
         return _format_result(
             success=False,
-            message=f"code_file_id {code_file_id} was not found. Available code files: {available_text}",
+            message=(
+                f"code_file_id {code_file_id} was not found. "
+                f"Available code files: {format_available_code_file_ids(state)}"
+            ),
             code_file_id=code_file_id,
             problem_id=problem_id,
             language=None,

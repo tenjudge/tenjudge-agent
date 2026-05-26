@@ -141,7 +141,8 @@ async def test_run_task_appends_code_files_and_messages(monkeypatch):
     current_state["code_file_cnt"] = 1
     current_state["messages"].append(HumanMessage(content="previous context"))
 
-    code_sources = ["int main() { return 0; }", "print('ok')"]
+    code_sources = ["int main() { return 0; }\r\n", "print('ok')\r"]
+    normalized_code_sources = ["int main() { return 0; }\n", "print('ok')\n"]
     await runner.run_task(
         conversation_id=conversation_id,
         turn_index=1,
@@ -152,12 +153,15 @@ async def test_run_task_appends_code_files_and_messages(monkeypatch):
     )
     await asyncio.sleep(0)
 
-    assert calls["code_sources"] == code_sources
+    assert calls["code_sources"] == normalized_code_sources
     assert calls["message"] == "please compare these files"
-    assert [message.content for message in calls["history_messages"]] == [
-        "You are the TenJudge online judge platform assistant.",
-        "previous context",
-    ]
+    assert calls["history_messages"][0].content.startswith(
+        "You are the TenJudge online judge platform assistant."
+    )
+    assert "private execution context" in calls["history_messages"][0].content
+    assert "internal code file system is only an execution aid" in calls["history_messages"][0].content
+    assert "Do not offer menus of possible next steps" in calls["history_messages"][0].content
+    assert calls["history_messages"][1].content == "previous context"
     assert calls["available_tools"] is AGENT_TOOLS
     assert calls["planning_guidance"] is None
     assert calls["plan_messages"][-1].content == "please compare these files"
@@ -167,7 +171,7 @@ async def test_run_task_appends_code_files_and_messages(monkeypatch):
         "code_file_2",
         "code_file_3",
     ]
-    assert [code_file.file.content for code_file in current_state["code_files"]] == code_sources
+    assert [code_file.file.content for code_file in current_state["code_files"]] == normalized_code_sources
 
     assert len(current_state["messages"]) == 6
     assert "Code file context id: code_file_2" in current_state["messages"][2].content
@@ -180,14 +184,13 @@ async def test_run_task_appends_code_files_and_messages(monkeypatch):
 
     assert calls["stream_mode"] == ["messages", "custom", "values"]
     assert fake_redis.events == [
-        (f"agent:task:{task_id}:events", {"event": "progress", "data": "Planning response"}),
         (f"agent:task:{task_id}:events", {"event": "progress", "data": "Thinking"}),
         (f"agent:task:{task_id}:events", {"event": "progress", "data": "Analyzing context"}),
         (f"agent:task:{task_id}:events", {"event": "message", "data": "final "}),
         (f"agent:task:{task_id}:events", {"event": "message", "data": "answer"}),
         (f"agent:task:{task_id}:events", {"event": "done", "data": ""}),
     ]
-    assert fake_redis.expires == [(f"agent:task:{task_id}:events", 60)] * 6
+    assert fake_redis.expires == [(f"agent:task:{task_id}:events", 60)] * 5
     assert calls["agent_message"].conversation_id == conversation_id
     assert calls["agent_message"].turn_index == 1
     assert calls["agent_message"].role == "agent"

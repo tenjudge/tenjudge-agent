@@ -16,6 +16,7 @@ from app.agents.context import (
     ProblemContext,
     Submission,
     SubmissionContext,
+    normalize_code_content,
 )
 from app.agents.orchestrator import (
     State,
@@ -170,7 +171,7 @@ def _append_submission_code_file_context(
                 f"Use this file as the code reference when reasoning about {submission_context.id}."
             ),
             language=submission.language if submission.language in {"cpp", "python"} else "else",
-            content=submission.code,
+            content=normalize_code_content(submission.code),
         ),
     )
 
@@ -287,7 +288,7 @@ async def handle_chat(request: Any, token: str, user_id: int) -> dict[str, uuid.
             attachment_messages: list[HumanMessage] = []
             for attachment in request.attachments:
                 if attachment.type == "code":
-                    code_sources.append(attachment.content)
+                    code_sources.append(normalize_code_content(attachment.content))
                 elif attachment.type == "problem":
                     # 1.1 题目附件：查询题面并写入 state["problems"]
                     problem = await get_problem(attachment.problem_id, token)
@@ -343,7 +344,7 @@ async def handle_chat(request: Any, token: str, user_id: int) -> dict[str, uuid.
             task_stream_key = f"agent:task:{current_task_id}:events"
             await redis_client.xadd(task_stream_key, {
                 "event": "progress",
-                "data": "Preparing task",
+                "data": "Planning",
             })
             await redis_client.expire(task_stream_key, settings.REDIS_STREAM_TTL_SECONDS)
     # _print_state(current_state)
