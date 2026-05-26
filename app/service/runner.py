@@ -139,6 +139,7 @@ async def run_task(
         current_state["messages"].append(SystemMessage(content=format_plan_for_message(plan)))
 
         # 5. 流式执行主 agent：custom 转 progress，agent_node 的 messages 转回答流。
+        await _publish_task_event(task_id, "progress", "Thinking")
         final_answer = ""
         final_state = current_state
         async for stream_mode, chunk in agent.astream(

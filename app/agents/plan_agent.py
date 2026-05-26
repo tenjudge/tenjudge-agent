@@ -264,7 +264,7 @@ async def make_plan(
         else:
             unavailable_tool_names = _find_unavailable_tool_names(plan, available_tool_names)
             if not unavailable_tool_names:
-                logger.info("计划生成完成 plan=%s", format_plan_for_message(plan)[:2000])
+                logger.info("【计划完成】\n%s", format_plan_for_message(plan))
                 return plan
 
             retry_note = (

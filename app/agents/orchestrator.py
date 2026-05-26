@@ -15,6 +15,7 @@ from app.agents.context import CodeFileContext, ProblemContext, SubmissionContex
 from app.agents.models import LLM
 from app.core.config import settings
 from app.tools.database import query_oj_database
+from app.tools.judge import submit_code_for_judge
 from app.tools.misc import get_current_time, get_current_user_id
 
 
@@ -111,12 +112,14 @@ def state_from_dict(state: dict[str, Any]) -> State:
 # TODO 接入题目、提交、代码文件等更多业务工具后，在这里统一维护。
 AGENT_TOOLS: list[BaseTool] = [
     query_oj_database,
+    submit_code_for_judge,
     get_current_time,
     get_current_user_id,
 ]
 
 TOOL_PROGRESS_MESSAGES = {
     "query_oj_database": "Querying database",
+    "submit_code_for_judge": "Submitting code for judging",
     "get_current_time": "Checking current time",
     "get_current_user_id": "Checking current user",
 }
@@ -141,6 +144,12 @@ def _get_tool_call_name(request: Any) -> str | None:
     return getattr(tool_call, "name", None)
 
 
+def _get_model_tool_call_name(tool_call: Any) -> str:
+    if isinstance(tool_call, dict):
+        return str(tool_call.get("name") or "unknown")
+    return str(getattr(tool_call, "name", None) or "unknown")
+
+
 async def _wrap_tool_call_with_progress(
         request: Any,
         call_tool: Callable[[Any], Awaitable[Any]],
@@ -163,24 +172,18 @@ def _current_turn_react_round_count(state: State) -> int:
 
 # [node] ReAct 推理节点；达到轮数上限后不再绑定工具，让模型直接输出内容。
 async def agent_node(state: State) -> dict[str, list[AnyMessage]]:
-    react_round = _current_turn_react_round_count(state) + 1
     tools = [] if _current_turn_react_round_count(state) >= settings.AGENT_MAX_REACT_ROUNDS else AGENT_TOOLS
-    _write_progress_event("Thinking")
-    logger.info(
-        "agent_node开始调用模型 react_round=%s message_count=%s tool_count=%s",
-        react_round,
-        len(state["messages"]),
-        len(tools),
-    )
     response = await LLM("medium").ainvoke(
         messages=state["messages"],
         tools=tools,
     )
-    logger.info(
-        "agent_node模型输出完成 content=%s tool_calls=%s",
-        str(response.content)[:2000],
-        getattr(response, "tool_calls", None) or [],
-    )
+    content = getattr(response, "content", "")
+    if content:
+        logger.info("【模型输出】\n%s", content if isinstance(content, str) else str(content))
+
+    for tool_call in getattr(response, "tool_calls", None) or []:
+        logger.info("【工具调用】%s", _get_model_tool_call_name(tool_call))
+
     return {"messages": [response]}
 
 
