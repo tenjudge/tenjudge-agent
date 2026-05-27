@@ -20,7 +20,8 @@ uv run uvicorn app.main:app --reload
 ## Confirmed Application Structure
 
 - `app/main.py` creates the FastAPI application.
-- `app/router/chat.py` defines the `/agent/chat` route, owns the chat request/response DTO models, and exposes `/agent/chat/{task_id}/events` for SSE subscription.
+- `app/router/chat.py` defines the `/chat` route, owns the chat request/response DTO models, and exposes `/chat/{task_id}/events` for SSE subscription.
+- `app/router/conversation.py` defines conversation routes, including `/conversations` for listing the authenticated user's conversations and `/conversations/{conversation_id}` for loading one conversation's detail and messages.
 - `app/service/chat.py` contains chat service code.
 - `app/service/tenjudge_server.py` contains outbound HTTP calls to the TenJudge server, including current-user, problem, submission lookup, judge submission, and judge-result polling.
 - `app/agents/context.py` contains agent context models such as `CodeFile`, `CodeFileContext`, `Problem`, `ProblemContext`, `Submission`, `SubmissionDetail`, and `SubmissionContext`, plus shared code file helpers including LF newline normalization and state lookup helpers for `CodeFileContext`.
@@ -41,15 +42,20 @@ uv run uvicorn app.main:app --reload
 - `app/core/config.py` contains configuration code.
 - `app/core/db.py` contains database lifecycle code.
 - `app/core/redis.py` contains the global async Redis client and Redis shutdown helper.
+- `app/main.py` configures FastAPI CORS for local frontend origins `http://localhost:5173` and `http://127.0.0.1:5173`, with credentials and custom headers allowed.
 
 ## Confirmed Architecture Plan
 
-- Chat submission is implemented as two phases: a `POST /agent/chat` request submits chat input, and `GET /agent/chat/{task_id}/events` subscribes to SSE output.
+- Chat submission is implemented as two phases: a `POST /chat` request submits chat input, and `GET /chat/{task_id}/events` subscribes to SSE output.
+- Conversation list retrieval is implemented as `GET /conversations`, returns only `id`, `title`, and `next_cursor`, and sorts conversations by `updated_at DESC`.
+- `GET /conversations` uses cursor pagination with `limit` and opaque `cursor`; the first request omits `cursor`, and `next_cursor = null` means there are no more conversations.
+- Conversation detail retrieval is implemented as `GET /conversations/{conversation_id}`, returns `id`, `title`, `status`, `running_task_id`, and full historical `messages`.
+- `GET /conversations/{conversation_id}` returns user message attachments exactly as stored in `messages.attachments`; when `conversation.status = running`, `running_task_id` is loaded from the current turn task so the frontend can subscribe to the task SSE stream.
 - SSE output is implemented from Redis Stream reads.
 - `task_id` is used by the later `GET` request to listen for SSE output and is part of the Redis key `agent:task:{task_id}:events`.
 - Redis Stream event fields are `event` and `data`; supported event values are `progress`, `message`, `title`, `failed`, and `done`, and `data` is a plain string.
-- `handle_chat` creates the task Redis Stream before returning from `POST /agent/chat` by writing `progress` with data `Planning`.
-- Redis Stream keys use `app.core.config.Settings.REDIS_STREAM_TTL_SECONDS` as their TTL; `GET /agent/chat/{task_id}/events` returns `NOT_FOUND` when the stream key no longer exists.
+- `handle_chat` creates the task Redis Stream before returning from `POST /chat` by writing `progress` with data `Planning`.
+- Redis Stream keys use `app.core.config.Settings.REDIS_STREAM_TTL_SECONDS` as their TTL; `GET /chat/{task_id}/events` returns `NOT_FOUND` when the stream key no longer exists.
 - SSE subscription validates ownership by looking up the task by `task_id`, loading its conversation, and comparing `conversation.user_id` with the authenticated TenJudge user id.
 - SSE subscription supports `Last-Event-ID` using Redis Stream entry ids and sends `: ping` heartbeat comments on Redis read timeouts.
 - This project will not use database foreign key constraints.

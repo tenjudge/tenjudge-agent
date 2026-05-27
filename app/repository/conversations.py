@@ -16,6 +16,58 @@ class Conversation(BaseModel):
     status: Literal["finished", "running"]
 
 class ConversationRepository:
+    async def list_by_user_id(
+        self,
+        user_id: int,
+        limit: int,
+        before_updated_at: datetime | None = None,
+        before_id: uuid.UUID | None = None,
+        conn=None,
+    ) -> list[Conversation]:
+        if (before_updated_at is None) != (before_id is None):
+            raise ValueError("before_updated_at and before_id must be provided together")
+
+        if conn is None:
+            async with pool.connection() as conn:
+                return await self.list_by_user_id(
+                    user_id,
+                    limit,
+                    before_updated_at=before_updated_at,
+                    before_id=before_id,
+                    conn=conn,
+                )
+
+        async with conn.cursor(row_factory=dict_row) as cur:
+            if before_updated_at is None:
+                await cur.execute(
+                    """
+                    SELECT id, user_id, title, updated_at, current_turn, status
+                    FROM conversations
+                    WHERE user_id = %s
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT %s
+                    """,
+                    (user_id, limit),
+                )
+            else:
+                await cur.execute(
+                    """
+                    SELECT id, user_id, title, updated_at, current_turn, status
+                    FROM conversations
+                    WHERE user_id = %s
+                      AND (
+                          updated_at < %s
+                          OR (updated_at = %s AND id < %s)
+                      )
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT %s
+                    """,
+                    (user_id, before_updated_at, before_updated_at, before_id, limit),
+                )
+            rows = await cur.fetchall()
+
+        return [Conversation.model_validate(row) for row in rows]
+
     async def get_by_id(self, conversation_id: uuid.UUID, conn=None) -> Conversation | None:
         if conn is None:
             async with pool.connection() as conn:
