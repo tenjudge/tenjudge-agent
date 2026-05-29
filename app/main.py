@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.response import register_exception_handlers
 from app.core.db import *
 from app.core.redis import close_redis
+from app.rag.importer import startup_rag
 from app.router.chat import router as chat_router
 from app.router.conversation import router as conversation_router
 
@@ -17,6 +18,7 @@ LOCAL_CORS_ORIGINS = [
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await open_db()
+    await startup_rag()
     yield
     await close_redis()
     await close_db()

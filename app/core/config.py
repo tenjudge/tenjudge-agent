@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     AGENT_MAX_REACT_ROUNDS: int = 8
     AGENT_REACT_ROUND_WARNING_REMAINING: int = 2
     AGENT_DB_TOOL_DATABASE_URL: str = ""
+    RAG_SKILL_DIR: str = ""
+    RAG_KNOWLEDGE_DIR: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

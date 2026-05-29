@@ -18,6 +18,7 @@ from app.tools.code_file import CODE_FILE_TOOLS
 from app.tools.database import query_oj_database
 from app.tools.judge import submit_code_for_judge
 from app.tools.misc import get_current_time, get_current_user_id
+from app.tools.rag import search_knowledge_base
 
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,7 @@ def state_from_dict(state: dict[str, Any]) -> State:
 # TODO 接入题目、提交等更多业务工具后，在这里统一维护。
 AGENT_TOOLS: list[BaseTool] = [
     query_oj_database,
+    search_knowledge_base,
     submit_code_for_judge,
     *CODE_FILE_TOOLS,
     get_current_time,
@@ -131,6 +133,7 @@ AGENT_TOOLS: list[BaseTool] = [
 
 TOOL_PROGRESS_MESSAGES = {
     "query_oj_database": "Querying database",
+    "search_knowledge_base": "Searching knowledge base",
     "submit_code_for_judge": "Submitting code for judging",
     "create_code_file": "Creating code file",
     "replace_code_file_content": "Updating code file",

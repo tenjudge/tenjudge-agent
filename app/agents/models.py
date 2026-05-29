@@ -7,13 +7,13 @@ from app.core.config import settings
 
 models = {
     "low": ChatOpenAI(
-        model="deepseek/deepseek-v4-flash",
+        model="xiaomi/mimo-v2.5",
         api_key=settings.OPENROUTER_API_KEY,
         base_url="https://openrouter.ai/api/v1",
         extra_body={"reasoning": {"effort": "none"}}
     ),
     "medium": ChatOpenAI(
-        model="deepseek/deepseek-v4-pro",
+        model="xiaomi/mimo-v2.5",
         api_key=settings.OPENROUTER_API_KEY,
         base_url="https://openrouter.ai/api/v1",
         extra_body={"reasoning": {"effort": "none"}}
